@@ -51,13 +51,13 @@ always named by their full path from the top of the file.
 
 | Command                       | What it does                                          |
 | ----------------------------- | ----------------------------------------------------- |
-| `ls [-l] [-R] [path]`         | list a folder (`-l` details, `-R` recursive)          |
+| `ls [-l\|-u] [-R] [path]`     | list a folder (`-l` details, `-u` URLs only, `-R` recursive) |
 | `cat [-o json\|yaml\|xml] [path]` | print a bookmark or folder, including everything below it |
 | `add <folder> <title> <url>`  | add a bookmark (`-d` sets a description)              |
 | `mkdir [-p] <path>...`        | create folders (`-p` creates parents, no error if present) |
 | `cp [-r] <source>... <dest>`  | copy (`-r` required for folders)                      |
 | `mv <source>... <dest>`       | move, or rename if `dest` is a new name               |
-| `rm [-r] <path>...`           | remove (`-r` required for folders)                    |
+| `rm [-r] [--host GLOB] <path>...` | remove (`-r` required for folders; `--host` removes matching bookmarks) |
 
 Flags that work with every command: `-n/--dry-run` (print what would change,
 write nothing), `--backup` (keep the original as `<file>.bak`), `-v/--verbose`
@@ -80,6 +80,31 @@ sources go inside it; otherwise `dest` is a new name inside an existing folder
 If a title is ambiguous the command stops and tells you. `ls` prints names in
 this form, adding `[n]` where titles repeat, so you can paste them into other
 commands. Quote paths in your shell: `[` is a glob character in zsh.
+
+### Listing and removing by URL
+
+`ls -u` prints only the URL of each bookmark, one per line (with `-R`, one flat
+list for the whole subtree), ready for `sort`, `xargs` or a `while read` loop.
+Two options, both repeatable and independent of each other, need `-u`:
+
+- `--host GLOB` lists only bookmarks whose host matches.
+- `--no-query GLOB` removes the query string and fragment (`?...`, `#...`) from
+  URLs whose host matches. `'*'` matches every host.
+
+Patterns are globs (`*`, `?`, `[abc]`) matched against the host alone, ignoring
+case and port. `example.com` does not match `www.example.com`; give
+`'*.example.com'` as well. `*` also matches dots.
+
+`rm --host GLOB` removes the bookmarks that `ls -u --host GLOB` lists, so you
+can export a list and then remove it. Each path is a folder to search (one
+level, subfolders are left alone) or a single bookmark; no folder is removed.
+It cannot be combined with `-r`, and nothing is written if nothing matches.
+
+```console
+$ xb bookmarks.xbel ls -u --host example.com --host '*.example.com' --no-query '*' /Done >> done.txt
+$ xb bookmarks.xbel -n rm --host example.com --host '*.example.com' /Done   # preview
+$ xb bookmarks.xbel --backup rm --host example.com --host '*.example.com' /Done
+```
 
 ### Behaviour worth knowing
 

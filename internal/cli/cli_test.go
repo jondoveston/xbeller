@@ -118,6 +118,22 @@ func TestLs(t *testing.T) {
 			"d  -           Work/    4 items\n" +
 			"d  -           Dupes/   3 items\n"},
 		{[]string{"ls", "-R", "/Work"}, "/Work:\nWork A\n---\nDeep/\n@b1\n\n/Work/Deep:\nDeep link\n"},
+		{[]string{"ls", "-u"}, "https://example.com/\n"},
+		{[]string{"ls", "-u", "/Work"}, "https://example.com/a?x=1&y=2\n"},
+		{[]string{"ls", "-u", "-R", "/Work"}, "https://example.com/a?x=1&y=2\nhttps://deep.example.com/\n"},
+		{[]string{"ls", "-u", "-R"}, "https://example.com/\nhttps://example.com/a?x=1&y=2\nhttps://deep.example.com/\nhttps://one.example.com/\nhttps://two.example.com/\n"},
+		{[]string{"ls", "-u", "/Example"}, "https://example.com/\n"},
+		{[]string{"ls", "-u", "/Dupes"}, "https://one.example.com/\nhttps://two.example.com/\n"},
+		{[]string{"ls", "-u", "/Dupes/Same[3]"}, ""},
+		{[]string{"ls", "-u", "/Work/Deep"}, "https://deep.example.com/\n"},
+		{[]string{"ls", "-u", "-R", "--host", "*.example.com"}, "https://deep.example.com/\nhttps://one.example.com/\nhttps://two.example.com/\n"},
+		{[]string{"ls", "-u", "-R", "--host", "EXAMPLE.COM"}, "https://example.com/\nhttps://example.com/a?x=1&y=2\n"},
+		{[]string{"ls", "-u", "-R", "--host", "one.example.com", "--host", "two.example.com"}, "https://one.example.com/\nhttps://two.example.com/\n"},
+		{[]string{"ls", "-u", "/Work", "--host", "nomatch.test"}, ""},
+		{[]string{"ls", "-u", "-R", "--no-query", "example.com"}, "https://example.com/\nhttps://example.com/a\nhttps://deep.example.com/\nhttps://one.example.com/\nhttps://two.example.com/\n"},
+		{[]string{"ls", "-u", "-R", "--no-query", "*"}, "https://example.com/\nhttps://example.com/a\nhttps://deep.example.com/\nhttps://one.example.com/\nhttps://two.example.com/\n"},
+		{[]string{"ls", "-u", "-R", "--host", "example.com", "--no-query", "*"}, "https://example.com/\nhttps://example.com/a\n"},
+		{[]string{"ls", "-u", "/Work", "--no-query", "deep.example.com"}, "https://example.com/a?x=1&y=2\n"},
 	}
 	for _, tt := range tests {
 		got := mustRun(t, append([]string{path}, tt.args...)...)
@@ -127,6 +143,108 @@ func TestLs(t *testing.T) {
 	}
 	if _, errOut, code := run(t, "xbeller", path, "ls", "/Dupes/Same"); code == 0 || !strings.Contains(errOut, "ambiguous") {
 		t.Errorf("ambiguous ls: %d %q", code, errOut)
+	}
+}
+
+func TestLsURLsErrors(t *testing.T) {
+	path := sample(t)
+	tests := [][]string{
+		{"ls", "-u", "-l"},
+		{"ls", "--host", "x"},
+		{"ls", "--no-query", "x"},
+		{"ls", "-u", "--host", "["},
+		{"ls", "-u", "--no-query", "["},
+	}
+	for _, args := range tests {
+		out, errOut, code := run(t, "xbeller", append([]string{path}, args...)...)
+		if code == 0 || out != "" || errOut == "" {
+			t.Errorf("%v: code %d, stdout %q, stderr %q", args, code, out, errOut)
+		}
+	}
+}
+
+func TestRmHost(t *testing.T) {
+	path := sample(t)
+
+	// No match: file untouched, no output.
+	before, _ := os.ReadFile(path)
+	if out := mustRun(t, path, "rm", "--host", "nomatch.test", "/Work"); out != "" {
+		t.Errorf("no match printed %q", out)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Error("file rewritten although nothing matched")
+	}
+
+	// Subfolders are not searched.
+	mustRun(t, path, "rm", "--host", "*.example.com", "/Work")
+	if got := mustRun(t, path, "ls", "-u", "-R", "/Work"); got != "https://example.com/a?x=1&y=2\nhttps://deep.example.com/\n" {
+		t.Errorf("after rm /Work with *.example.com: %q", got)
+	}
+
+	// Dry run lists the bookmarks and does not write.
+	before, _ = os.ReadFile(path)
+	out := mustRun(t, path, "-n", "rm", "--host", "*.example.com", "/Dupes")
+	if out != "dry-run: rm /Dupes/Same[1]\ndry-run: rm /Dupes/Same[2]\n" {
+		t.Errorf("dry-run output %q", out)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Error("dry run wrote the file")
+	}
+
+	// Real removal of the two duplicates; the same-named folder stays.
+	mustRun(t, path, "rm", "--host", "*.example.com", "/Dupes")
+	if got := mustRun(t, path, "ls", "/Dupes"); got != "Same/\n" {
+		t.Errorf("ls /Dupes = %q", got)
+	}
+
+	// A single bookmark path, and the root.
+	mustRun(t, path, "rm", "--host", "example.com", "/Example")
+	if got := mustRun(t, path, "ls", "/"); got != "Work/\nDupes/\n" {
+		t.Errorf("ls / = %q", got)
+	}
+
+	// Errors leave the file alone.
+	before, _ = os.ReadFile(path)
+	for _, args := range [][]string{
+		{"rm", "-r", "--host", "x", "/Work"},
+		{"rm", "--host", "[", "/Work"},
+		{"rm", "--host", "x", "/Missing"},
+	} {
+		if _, _, code := run(t, "xbeller", append([]string{path}, args...)...); code == 0 {
+			t.Errorf("%v succeeded", args)
+		}
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Error("file changed after errors")
+	}
+}
+
+// TestRmHostMatchesLsURLs checks that rm --host removes exactly the bookmarks
+// that ls -u --host lists.
+func TestRmHostMatchesLsURLs(t *testing.T) {
+	for _, folder := range []string{"/", "/Work", "/Dupes", "/Work/Deep"} {
+		for _, glob := range []string{"example.com", "*.example.com", "*", "one.example.com", "nomatch"} {
+			path := sample(t)
+			all := strings.Fields(mustRun(t, path, "ls", "-u", folder))
+			listed := map[string]bool{}
+			for _, u := range strings.Fields(mustRun(t, path, "ls", "-u", "--host", glob, folder)) {
+				listed[u] = true
+			}
+			mustRun(t, path, "rm", "--host", glob, folder)
+			if got := mustRun(t, path, "ls", "-u", "--host", glob, folder); got != "" {
+				t.Errorf("%s %s: still listed %q", folder, glob, got)
+			}
+			var want []string
+			for _, u := range all {
+				if !listed[u] {
+					want = append(want, u)
+				}
+			}
+			got := strings.Fields(mustRun(t, path, "ls", "-u", folder))
+			if strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Errorf("%s %s: remaining %q, want %q", folder, glob, got, want)
+			}
+		}
 	}
 }
 

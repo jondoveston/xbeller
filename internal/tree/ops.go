@@ -177,6 +177,47 @@ func Remove(root *xbel.Node, paths []string, recursive bool) ([]string, error) {
 	return log, nil
 }
 
+// RemoveMatching removes the bookmarks whose URL host matches globs. Each path
+// names a folder to search (one level only, subfolders are left alone) or a
+// single bookmark. The root folder is allowed. Folders are never removed.
+func RemoveMatching(root *xbel.Node, paths []string, globs HostGlobs) ([]string, error) {
+	if err := globs.Validate(); err != nil {
+		return nil, err
+	}
+	type hit struct {
+		parent, node *xbel.Node
+		path         string
+	}
+	var hits []hit
+	seen := map[*xbel.Node]bool{}
+	for _, p := range paths {
+		e, err := Resolve(root, p)
+		if err != nil {
+			return nil, err
+		}
+		if !e.Node.IsContainer() {
+			if e.Node.Kind == xbel.KindBookmark && !seen[e.Node] && globs.MatchURL(e.Node.Href()) {
+				seen[e.Node] = true
+				hits = append(hits, hit{e.Parent, e.Node, p})
+			}
+			continue
+		}
+		names := DisplayNames(e.Node.Children)
+		for i, c := range e.Node.Children {
+			if c.Kind == xbel.KindBookmark && !seen[c] && globs.MatchURL(c.Href()) {
+				seen[c] = true
+				hits = append(hits, hit{e.Node, c, Join(p, names[i])})
+			}
+		}
+	}
+	var log []string
+	for _, h := range hits {
+		detach(h.parent, h.node)
+		log = append(log, "rm "+displayPath(h.path))
+	}
+	return log, nil
+}
+
 // resolveSources resolves every path before anything is changed, since later
 // paths with [n] selectors would shift after an earlier removal. It returns
 // the entries together with the paths they came from. If unique is set, a

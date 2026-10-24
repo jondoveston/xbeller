@@ -51,6 +51,83 @@ func titles(t *testing.T, root *xbel.Node, path string) []string {
 	return out
 }
 
+func TestHostGlobs(t *testing.T) {
+	g := HostGlobs{"example.com", "*.Example.org"}
+	for href, want := range map[string]bool{
+		"https://example.com/x?y=1":       true,
+		"https://EXAMPLE.com:8080/":       true,
+		"https://www.example.com/":        false,
+		"https://a.b.example.org/":        true,
+		"https://example.org/":            false,
+		"mailto:me@example.com":           false,
+		"javascript:void(0)":              false,
+		"://bad":                          false,
+		"":                                false,
+		"https://user@example.com:1/path": true,
+	} {
+		if got := g.MatchURL(href); got != want {
+			t.Errorf("MatchURL(%q) = %v, want %v", href, got, want)
+		}
+	}
+	if err := (HostGlobs{"ok", "["}).Validate(); err == nil {
+		t.Error("invalid pattern accepted")
+	}
+	if err := g.Validate(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestStripQuery(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://a.com/p?x=1":          "https://a.com/p",
+		"https://a.com/p?":             "https://a.com/p",
+		"https://a.com/p#frag":         "https://a.com/p",
+		"https://a.com/p?a=1#frag":     "https://a.com/p",
+		"https://a.com:8080/p?a=1":     "https://a.com:8080/p",
+		"https://a.com/p":              "https://a.com/p",
+		"https://a.com/a%20b?x=1":      "https://a.com/a%20b",
+		"mailto:me@a.com?subject=hi":   "mailto:me@a.com",
+		"://bad?x=1":                   "://bad?x=1",
+		"https://a.com/p?v=1&w=%7Efoo": "https://a.com/p",
+	} {
+		if got := StripQuery(in); got != want {
+			t.Errorf("StripQuery(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRemoveMatching(t *testing.T) {
+	root := load(t)
+	// Searches one level only: Deep link is in a subfolder.
+	log, err := RemoveMatching(root, []string{"/Work"}, HostGlobs{"*.example.com"})
+	if err != nil || len(log) != 0 {
+		t.Fatalf("log %v err %v", log, err)
+	}
+	log, err = RemoveMatching(root, []string{"/Work"}, HostGlobs{"example.com"})
+	if err != nil || !reflect.DeepEqual(log, []string{"rm /Work/Work A"}) {
+		t.Fatalf("log %v err %v", log, err)
+	}
+	if got := titles(t, root, "/Work"); !reflect.DeepEqual(got, []string{"Deep"}) {
+		t.Errorf("/Work = %v", got)
+	}
+	// Overlapping paths remove each bookmark once, and folders stay.
+	log, err = RemoveMatching(root, []string{"/Dupes", "/Dupes/Same[1]", "/"}, HostGlobs{"*"})
+	want := []string{"rm /Dupes/Same[1]", "rm /Dupes/Same[2]", "rm /Example"}
+	if err != nil || !reflect.DeepEqual(log, want) {
+		t.Fatalf("log %v err %v, want %v", log, err, want)
+	}
+	if got := titles(t, root, "/Dupes"); !reflect.DeepEqual(got, []string{"Same"}) {
+		t.Errorf("/Dupes = %v", got)
+	}
+	// Errors change nothing.
+	if _, err := RemoveMatching(root, []string{"/Work"}, HostGlobs{"["}); err == nil {
+		t.Error("bad pattern accepted")
+	}
+	if _, err := RemoveMatching(root, []string{"/Work", "/Missing"}, HostGlobs{"*"}); err == nil {
+		t.Error("missing path accepted")
+	}
+}
+
 func TestSplitPath(t *testing.T) {
 	tests := []struct {
 		in   string

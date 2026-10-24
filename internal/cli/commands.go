@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,8 +13,50 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// urlFilter selects and cleans the URLs printed by ls -u.
+type urlFilter struct {
+	hosts   tree.HostGlobs // list only these hosts (all if empty)
+	noQuery tree.HostGlobs // strip query and fragment for these hosts
+}
+
+// apply returns the URL to print, or false if it should not be listed.
+func (f urlFilter) apply(href string) (string, bool) {
+	if href == "" {
+		return "", false
+	}
+	if len(f.hosts) > 0 && !f.hosts.MatchURL(href) {
+		return "", false
+	}
+	if f.noQuery.MatchURL(href) {
+		href = tree.StripQuery(href)
+	}
+	return href, true
+}
+
+// listURLs prints the URL of each bookmark in dir, descending into
+// subfolders if recursive.
+func (a *app) listURLs(dir *xbel.Node, recursive bool, f urlFilter) error {
+	for _, c := range dir.Children {
+		switch {
+		case c.Hidden():
+		case c.Kind == xbel.KindBookmark:
+			if u, ok := f.apply(c.Href()); ok {
+				if err := a.printf("%s\n", u); err != nil {
+					return err
+				}
+			}
+		case c.Kind == xbel.KindFolder && recursive:
+			if err := a.listURLs(c, recursive, f); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (a *app) lsCmd() *cobra.Command {
-	var long, recursive bool
+	var long, recursive, urls bool
+	var hosts, noQuery []string
 	cmd := &cobra.Command{
 		Use:   "ls [path]",
 		Short: "List the contents of a folder",
@@ -22,9 +65,31 @@ with a trailing slash. Names that are shared by several items carry a [n]
 selector so they can be used in other commands.
 
 With -l each line shows the type (d folder, b bookmark, - separator,
-@ alias), the date added, the name, and the URL or number of items.`,
+@ alias), the date added, the name, and the URL or number of items.
+
+With -u only the URL of each bookmark is printed, one per line. With -R this
+is one flat list for the whole subtree. Two options refine it:
+
+  --host GLOB      list only bookmarks whose host matches
+  --no-query GLOB  remove the query string and fragment from URLs whose
+                   host matches ('*' matches every host)
+
+Both may be repeated and are independent of each other. Patterns use glob
+syntax (* ? [abc]) and are matched against the host alone, without port,
+ignoring case: example.com does not match www.example.com, so give
+'*.example.com' as well. '*' also matches dots.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			f := urlFilter{hosts: hosts, noQuery: noQuery}
+			if !urls && (len(hosts) > 0 || len(noQuery) > 0) {
+				return errors.New("--host and --no-query need -u")
+			}
+			if err := f.hosts.Validate(); err != nil {
+				return err
+			}
+			if err := f.noQuery.Validate(); err != nil {
+				return err
+			}
 			path := "/"
 			if len(args) == 1 {
 				path = args[0]
@@ -36,6 +101,18 @@ With -l each line shows the type (d folder, b bookmark, - separator,
 			e, err := tree.Resolve(doc.Root, path)
 			if err != nil {
 				return err
+			}
+			if urls {
+				if e.Node.Kind == xbel.KindBookmark {
+					if u, ok := f.apply(e.Node.Href()); ok {
+						return a.printf("%s\n", u)
+					}
+					return nil
+				}
+				if !e.Node.IsContainer() {
+					return nil
+				}
+				return a.listURLs(e.Node, recursive, f)
 			}
 			if !e.Node.IsContainer() {
 				// Like ls on a file: show just that entry.
@@ -49,6 +126,10 @@ With -l each line shows the type (d folder, b bookmark, - separator,
 	}
 	cmd.Flags().BoolVarP(&long, "long", "l", false, "use a long listing format")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "list subfolders recursively")
+	cmd.Flags().BoolVarP(&urls, "urls", "u", false, "print only bookmark URLs, one per line")
+	cmd.Flags().StringArrayVar(&hosts, "host", nil, "with -u, list only URLs whose host matches `GLOB` (repeatable)")
+	cmd.Flags().StringArrayVar(&noQuery, "no-query", nil, "with -u, remove query and fragment from URLs whose host matches `GLOB` (repeatable)")
+	cmd.MarkFlagsMutuallyExclusive("long", "urls")
 	return cmd
 }
 
@@ -257,16 +338,33 @@ moved inside it; otherwise dest is a new name inside an existing folder
 
 func (a *app) rmCmd() *cobra.Command {
 	var recursive bool
+	var hosts []string
 	cmd := &cobra.Command{
-		Use:   "rm [-r] <path>...",
+		Use:   "rm [-r] [--host GLOB] <path>...",
 		Short: "Remove bookmarks or folders",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Remove bookmarks or folders.
+
+With --host, each path is a folder to search (or a single bookmark) and only
+the bookmarks directly inside it whose host matches are removed. Subfolders
+are not searched and no folder is removed. This selects exactly the
+bookmarks that 'ls -u --host' lists, with the same glob rules, so a list can
+be exported and then removed. --host cannot be combined with -r.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(hosts) > 0 {
+				if recursive {
+					return errors.New("--host only works on the folder given; -r is for removing folders")
+				}
+				return a.mutate(func(root *xbel.Node) ([]string, error) {
+					return tree.RemoveMatching(root, args, hosts)
+				})
+			}
 			return a.mutate(func(root *xbel.Node) ([]string, error) {
 				return tree.Remove(root, args, recursive)
 			})
 		},
 	}
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "remove folders and their contents")
+	cmd.Flags().StringArrayVar(&hosts, "host", nil, "remove only bookmarks whose host matches `GLOB` (repeatable)")
 	return cmd
 }
