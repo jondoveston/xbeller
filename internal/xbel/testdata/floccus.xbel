@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xbel PUBLIC "+//IDN python.org//DTD XML Bookmark Exchange Language 1.0//EN//XML" "http://pyxml.sourceforge.net/topics/dtds/xbel.dtd">
+<xbel version="1.0">
+<!--- highestId :9: for Floccus bookmark sync browser extension -->
+
+<folder id="1">
+  <title>Toolbar</title>
+  <bookmark href="https://example.com/?a=1&amp;b=2" id="2">
+    <title>It&apos;s &quot;quoted&quot; &lt;b&gt;</title>
+  </bookmark>
+  <folder id="3">
+    <title>Nested</title>
+    <bookmark href="https://deep.example.com/" id="4">
+      <title>Deep</title>
+    </bookmark>
+  </folder>
+  <folder id="8">
+    <title>Empty</title>
+  </folder>
+</folder>
+<bookmark href="https://top.example.com/" id="9">
+  <title></title>
+</bookmark>
+</xbel>

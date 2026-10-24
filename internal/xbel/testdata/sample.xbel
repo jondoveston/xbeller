@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xbel PUBLIC "+//IDN python.org//DTD XML Bookmark Exchange Language 1.0//EN//XML" "http://www.python.org/topics/xml/dtds/xbel-1.0.dtd">
+<xbel version="1.0">
+  <title>Bookmarks</title>
+  <info>
+    <metadata owner="example"/>
+  </info>
+  <bookmark href="https://example.com/" id="b1" added="2024-01-02T03:04:05Z">
+    <title>Example</title>
+    <desc>The example site &amp; more</desc>
+  </bookmark>
+  <folder id="f1" folded="no">
+    <title>Work</title>
+    <bookmark href="https://example.com/a?x=1&amp;y=2" id="b2">
+      <title>Work A</title>
+    </bookmark>
+    <separator/>
+    <folder id="f2">
+      <title>Deep</title>
+      <bookmark href="https://deep.example.com/">
+        <title>Deep link</title>
+      </bookmark>
+    </folder>
+    <alias ref="b1"/>
+    <vendor:thing xmlns:vendor="urn:vendor" key="v">
+      <vendor:child>text</vendor:child>
+    </vendor:thing>
+  </folder>
+  <folder id="f3">
+    <title>Dupes</title>
+    <bookmark href="https://one.example.com/">
+      <title>Same</title>
+    </bookmark>
+    <bookmark href="https://two.example.com/">
+      <title>Same</title>
+    </bookmark>
+    <folder>
+      <title>Same</title>
+    </folder>
+  </folder>
+</xbel>

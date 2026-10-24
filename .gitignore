@@ -1,0 +1,15 @@
+# build output
+/xbeller
+/xb
+/dist/
+/result
+/result-*
+coverage.out
+
+# go-task's up-to-date checks
+/.task/
+
+# bookmark files are personal data; only the test fixtures belong in git
+*.xbel
+*.xbel.bak
+!internal/**/testdata/*.xbel
